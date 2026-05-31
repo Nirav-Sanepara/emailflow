@@ -1,0 +1,126 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String    @id @default(cuid())
+  email     String    @unique
+  createdAt DateTime  @default(now())
+  profile   UserProfile?
+  templates Template[]
+  rules     Rule[]
+  events    Event[]
+  emailLogs EmailLog[]
+}
+
+model Plan {
+  id            String          @id
+  name          String
+  description   String?
+  features      Json            @default("{}")
+  priceMonthly  Decimal?        @map("price_monthly")
+  priceYearly   Decimal?        @map("price_yearly")
+  sortOrder     Int             @default(0) @map("sort_order")
+  isActive      Boolean         @default(true) @map("is_active")
+  createdAt     DateTime        @default(now()) @map("created_at")
+  updatedAt     DateTime        @updatedAt @map("updated_at")
+  profiles      UserProfile[]
+
+  @@map("plans")
+}
+
+model UserProfile {
+  userId            String     @id
+  email             String
+  planId            String     @map("plan_id")
+  subscriptionStatus String    @default("active") @map("subscription_status")
+  subscriptionEndsAt DateTime? @map("subscription_ends_at")
+  unsubscribed      Boolean    @default(false)
+  projectCount      Int        @default(0)
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+  user              User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan              Plan       @relation(fields: [planId], references: [id])
+
+  @@index([planId])
+}
+
+model Template {
+  id          String   @id @default(cuid())
+  name        String
+  subject     String
+  htmlBody    String
+  placeholders Json     @default("[]")
+  variableDefinitions Json?  // Stores variable metadata (type, fallback, required, label)
+  userId      String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  rules       Rule[]
+}
+
+model Rule {
+  id         String          @id @default(cuid())
+  name       String
+  eventType  String
+  templateId String
+  active     Boolean         @default(true)
+  userId     String
+  createdAt  DateTime        @default(now())
+  updatedAt  DateTime        @updatedAt
+  template   Template        @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  user       User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conditions RuleCondition[]
+  emailLogs  EmailLog[]
+  evalLogs   EvaluationLog[]
+}
+
+model RuleCondition {
+  id       String @id @default(cuid())
+  ruleId   String
+  field    String
+  operator String
+  value    Json
+  rule     Rule   @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+}
+
+model Event {
+  id              String   @id @default(cuid())
+  eventType       String
+  userId          String
+  payload         Json
+  idempotencyKey  String   @unique
+  processed       Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model EmailLog {
+  id              String   @id @default(cuid())
+  eventId         String
+  ruleId          String
+  templateId      String
+  userId          String
+  status          String
+  error           String?
+  providerResponse String?
+  createdAt       DateTime @default(now())
+  rule            Rule     @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model EvaluationLog {
+  id        String   @id @default(cuid())
+  eventId   String
+  ruleId    String
+  ruleName  String
+  matched   Boolean
+  details   Json     @default("{}")
+  createdAt DateTime @default(now())
+  rule      Rule     @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+}
