@@ -39,6 +39,8 @@ interface ConditionDetail {
 interface Template {
   id: string
   name: string
+  subject: string
+  htmlBody: string
 }
 
 interface TestEventModalProps {
@@ -123,6 +125,8 @@ export function TestEventModal({ ruleId, ruleName, eventType, templateId, condit
   const [testEmail, setTestEmail] = useState("")
   const [selectedTemplateId, setSelectedTemplateId] = useState(templateId)
   const [templates, setTemplates] = useState<Template[]>([])
+  const [templateVariables, setTemplateVariables] = useState<string[]>([])
+  const [variableValues, setVariableValues] = useState<Record<string, string>>({})
 
   const allFormFields = Array.from(new Set([...extractPayloadFields(conditions), ...extractUserFields(conditions)]))
 
@@ -155,6 +159,29 @@ export function TestEventModal({ ruleId, ruleName, eventType, templateId, condit
     }
     setFormValues(defaults)
   }, [open])
+
+  useEffect(() => {
+    setVariableValues({})
+    setTemplateVariables([])
+    const selected = templates.find((t) => t.id === selectedTemplateId)
+    if (!selected) return
+
+    const combined = `${selected.subject} ${selected.htmlBody}`
+    const regex = /\{\{(\w+)\}\}/g
+    const vars = new Set<string>()
+    let match
+    while ((match = regex.exec(combined)) !== null) {
+      vars.add(match[1])
+    }
+    const detected = Array.from(vars)
+    setTemplateVariables(detected)
+
+    const defaults: Record<string, string> = {}
+    for (const v of detected) {
+      defaults[v] = ""
+    }
+    setVariableValues(defaults)
+  }, [selectedTemplateId, templates])
 
   const updateFormValue = (key: string, value: string) => {
     setFormValues((prev) => ({ ...prev, [key]: value }))
@@ -190,6 +217,11 @@ export function TestEventModal({ ruleId, ruleName, eventType, templateId, condit
         const placeholderValues: Record<string, string> = {}
         for (const [key, value] of Object.entries(formValues)) {
           placeholderValues[key] = value
+        }
+        for (const [key, value] of Object.entries(variableValues)) {
+          if (value.trim()) {
+            placeholderValues[key] = value.trim()
+          }
         }
         placeholderValues.email = testEmail.trim()
 
@@ -378,6 +410,22 @@ export function TestEventModal({ ruleId, ruleName, eventType, templateId, condit
                 The template used when sending the test email
               </p>
             </div>
+
+            {templateVariables.length > 0 && (
+              <div className="space-y-3">
+                <Label>Template Variables</Label>
+                {templateVariables.map((v) => (
+                  <div key={v} className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">{v}</Label>
+                    <Input
+                      value={variableValues[v] || ""}
+                      onChange={(e) => setVariableValues((prev) => ({ ...prev, [v]: e.target.value }))}
+                      placeholder={`Enter ${v}`}
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
 
             {conditions.length > 0 && (
               <div className="space-y-2">
