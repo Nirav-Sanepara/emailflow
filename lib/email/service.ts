@@ -15,28 +15,35 @@ export async function sendEmailForRule(
       throw new Error("Template not found for rule");
     }
 
-    const profile = await prisma.userProfile.findUnique({
-      where: { userId },
-      include: { plan: true },
-    });
-    const userData = profile
-      ? {
-        user: {
-          email: profile.email,
-          planId: profile.planId,
-          planName: profile.plan?.name || profile.planId,
-          plan: {
-            id: profile.plan?.id,
-            name: profile.plan?.name,
-            features: profile.plan?.features,
-            priceMonthly: profile.plan?.priceMonthly,
-            priceYearly: profile.plan?.priceYearly,
+    let profileEmail: string | null = null;
+    let userData: Record<string, unknown> = {};
+    try {
+      const profile = await prisma.userProfile.findUnique({
+        where: { userId },
+        include: { plan: true },
+      });
+      if (profile) {
+        profileEmail = profile.email;
+        userData = {
+          user: {
+            email: profile.email,
+            planId: profile.planId,
+            planName: profile.plan?.name || profile.planId,
+            plan: {
+              id: profile.plan?.id,
+              name: profile.plan?.name,
+              features: profile.plan?.features,
+              priceMonthly: profile.plan?.priceMonthly,
+              priceYearly: profile.plan?.priceYearly,
+            },
+            unsubscribed: profile.unsubscribed,
+            projectCount: profile.projectCount,
           },
-          unsubscribed: profile.unsubscribed,
-          projectCount: profile.projectCount,
-        },
+        };
       }
-      : {};
+    } catch {
+      console.warn("Could not fetch user profile, using payload data only");
+    }
 
     const renderData = { ...payload, ...userData };
 
@@ -46,7 +53,7 @@ export async function sendEmailForRule(
       renderData
     );
 
-    const toEmail = profile?.email || "nirav.workspace@gmail.com";
+    const toEmail = profileEmail || (payload.email as string) || "nirav.workspace@gmail.com";
 
     const result = await sendEmailViaProvider(toEmail, subject, html);
 

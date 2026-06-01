@@ -14,11 +14,17 @@ export async function evaluateEventAgainstRules(
   eventId: string,
   eventType: string,
   userId: string,
-  payload: Record<string, unknown>
+  payload: Record<string, unknown>,
+  overrideTemplateId?: string,
+  ruleId?: string
 ): Promise<void> {
   try {
+    const where: any = { active: true, eventType, userId };
+    if (ruleId) {
+      where.id = ruleId;
+    }
     const rules = await prisma.rule.findMany({
-      where: { active: true, eventType, userId },
+      where,
       include: { conditions: true, template: true },
     });
 
@@ -28,13 +34,11 @@ export async function evaluateEventAgainstRules(
 
       for (const condition of rule.conditions) {
         let actualValue: unknown = undefined;
-        let fieldType = "payload";
 
         if (condition.field.startsWith("payload.")) {
           const fieldPath = condition.field.replace("payload.", "");
           actualValue = getNestedValue(payload, fieldPath);
         } else if (condition.field.startsWith("user.")) {
-          fieldType = "user";
           const fieldPath = condition.field.replace("user.", "");
           const profile = await prisma.userProfile.findUnique({
             where: { userId },
@@ -90,7 +94,23 @@ export async function evaluateEventAgainstRules(
       });
 
       if (allPassed) {
-        await sendEmailForRule(rule, eventId, userId, payload);
+        let resolvedTemplate = rule.template;
+
+        if (overrideTemplateId && overrideTemplateId !== rule.templateId) {
+          const override = await prisma.template.findUnique({
+            where: { id: overrideTemplateId },
+          });
+          if (override) {
+            resolvedTemplate = override;
+          }
+        }
+
+        await sendEmailForRule(
+          { ...rule, template: resolvedTemplate },
+          eventId,
+          userId,
+          payload
+        );
       }
     }
 

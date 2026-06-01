@@ -6,6 +6,8 @@ export async function ingestEvent(data: {
   userId: string;
   payload: Record<string, unknown>;
   idempotencyKey: string;
+  overrideTemplateId?: string;
+  ruleId?: string;
 }): Promise<{ received: true; alreadyProcessed?: boolean }> {
   const existing = await findEventByIdempotencyKey(data.idempotencyKey);
   if (existing) {
@@ -19,7 +21,9 @@ export async function ingestEvent(data: {
       event.id,
       data.eventType,
       data.userId,
-      data.payload
+      data.payload,
+      data.overrideTemplateId,
+      data.ruleId
     ).catch((e) => console.error("Background rule evaluation failed:", e));
   });
 

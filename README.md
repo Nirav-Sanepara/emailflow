@@ -8,6 +8,8 @@
 
 Event-driven email automation platform. Non-technical users can create templates, define trigger rules, simulate events, and send personalized emails — all without writing code.
 
+> Test credentials: `admin@example.com` / `Test123456`
+
 ---
 
 ## Features

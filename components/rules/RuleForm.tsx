@@ -26,8 +26,6 @@ const EVENT_TYPES = [
   { value: "trial_ended", label: "Trial Ended" },
 ]
 
-const EVENT_TYPE_VALUES = EVENT_TYPES.map((t) => t.value)
-
 interface RuleFormProps {
   templates: { id: string; name: string }[]
   initialData?: {
@@ -45,32 +43,12 @@ export function RuleForm({ templates, initialData, isEditing }: RuleFormProps) {
   const router = useRouter()
   const [name, setName] = useState(initialData?.name || "")
   const [eventType, setEventType] = useState(initialData?.eventType || "")
-  const [customEventType, setCustomEventType] = useState(
-    initialData?.eventType && !EVENT_TYPE_VALUES.includes(initialData.eventType) ? initialData.eventType : ""
-  )
   const [templateId, setTemplateId] = useState(initialData?.templateId || "")
   const [active, setActive] = useState(initialData?.active ?? true)
   const [conditions, setConditions] = useState<Condition[]>(
     initialData?.conditions || []
   )
   const [saving, setSaving] = useState(false)
-
-  const isCustomEvent = customEventType !== "" || (initialData?.eventType ? !EVENT_TYPE_VALUES.includes(initialData.eventType) : false)
-
-  const handleEventTypeSelect = (value: string) => {
-    if (value === "__custom__") {
-      setCustomEventType("")
-      setEventType("")
-    } else {
-      setCustomEventType("")
-      setEventType(value)
-    }
-  }
-
-  const handleCustomEventChange = (value: string) => {
-    setCustomEventType(value)
-    setEventType(value)
-  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -120,10 +98,7 @@ export function RuleForm({ templates, initialData, isEditing }: RuleFormProps) {
           </div>
           <div className="space-y-2">
             <Label htmlFor="eventType">Event Type</Label>
-            <Select
-              value={isCustomEvent ? "__custom__" : (EVENT_TYPE_VALUES.includes(eventType) ? eventType : "")}
-              onValueChange={handleEventTypeSelect}
-            >
+            <Select value={eventType} onValueChange={setEventType}>
               <SelectTrigger>
                 <SelectValue placeholder="Select event type" />
               </SelectTrigger>
@@ -133,18 +108,8 @@ export function RuleForm({ templates, initialData, isEditing }: RuleFormProps) {
                     {et.label}
                   </SelectItem>
                 ))}
-                <SelectItem value="__custom__">Custom event...</SelectItem>
               </SelectContent>
             </Select>
-            {isCustomEvent && (
-              <div className="mt-2">
-                <Input
-                  placeholder="Enter custom event type"
-                  value={customEventType}
-                  onChange={(e) => handleCustomEventChange(e.target.value)}
-                />
-              </div>
-            )}
             <p className="text-xs text-muted-foreground">The event type that triggers this rule</p>
           </div>
           <div className="space-y-2">

@@ -23,7 +23,7 @@ export async function POST(request: NextRequest) {
     if (!userId) return Response.json({ error: "Unauthorized" }, { status: 401 });
 
     const body = await request.json();
-    const { event_type, user_id, payload, idempotency_key } = body;
+    const { event_type, user_id, payload, idempotency_key, template_id, rule_id } = body;
 
     if (!event_type || !user_id || !idempotency_key) {
       return Response.json(
@@ -37,6 +37,8 @@ export async function POST(request: NextRequest) {
       userId: user_id,
       payload: payload || {},
       idempotencyKey: idempotency_key,
+      overrideTemplateId: template_id,
+      ruleId: rule_id,
     });
 
     return Response.json(result, { status: 200 });

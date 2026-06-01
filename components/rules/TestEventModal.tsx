@@ -4,21 +4,41 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
-import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { toast } from "sonner"
-import { Loader2, Zap, ExternalLink, CheckCircle2, XCircle } from "lucide-react"
+import { Loader2, Zap, CheckCircle2, XCircle, History } from "lucide-react"
+import { getFieldByPath, resolvePath } from "@/lib/rules/fieldDefinitions"
 
 interface Condition {
   field: string
   operator: string
   value: string
+}
+
+interface ConditionDetail {
+  field: string
+  operator: string
+  expectedValue: string
+  actualValue: string
+  passed: boolean
+}
+
+interface Template {
+  id: string
+  name: string
 }
 
 interface TestEventModalProps {
@@ -30,9 +50,6 @@ interface TestEventModalProps {
 }
 
 const SMART_DEFAULTS: Record<string, string> = {
-  first_name: "Test User",
-  last_name: "Tester",
-  email: "test@example.com",
   plan_name: "pro",
   plan: "pro",
   planId: "pro",
@@ -40,8 +57,6 @@ const SMART_DEFAULTS: Record<string, string> = {
   "plan.features.max_projects": "50",
   "plan.features.storage_gb": "50",
   "plan.features.supports_ai": "true",
-  name: "Test",
-  amount: "29.99",
 }
 
 function extractPayloadFields(conditions: Condition[]): string[] {
@@ -64,160 +79,160 @@ function extractUserFields(conditions: Condition[]): string[] {
   return Array.from(fields)
 }
 
-function extractPlaceholders(text: string): string[] {
-  const regex = /\{\{(\w+)\}\}/g
-  const placeholders = new Set<string>()
-  let match
-  while ((match = regex.exec(text)) !== null) {
-    placeholders.add(match[1])
+function prettyField(field: string): string {
+  return field.replace(/^payload\./, "").replace(/^user\./, "")
+}
+
+function operatorLabel(op: string): string {
+  const map: Record<string, string> = { eq: "=", neq: "!=", gt: ">", lt: "<", gte: ">=", lte: "<=", contains: "contains" }
+  return map[op] || op
+}
+
+function getFieldDef(formField: string, conditions: Condition[]): ReturnType<typeof getFieldByPath> {
+  const condition = conditions.find((c) => prettyField(c.field) === formField)
+  if (!condition) return undefined
+  return getFieldByPath(resolvePath(condition.field))
+}
+
+function evaluateCondition(actual: string, operator: string, expected: string): boolean {
+  switch (operator) {
+    case "eq":
+      return actual === expected
+    case "neq":
+      return actual !== expected
+    case "gt":
+      return Number(actual) > Number(expected)
+    case "lt":
+      return Number(actual) < Number(expected)
+    case "gte":
+      return Number(actual) >= Number(expected)
+    case "lte":
+      return Number(actual) <= Number(expected)
+    case "contains":
+      return actual.includes(expected)
+    default:
+      return actual === expected
   }
-  return Array.from(placeholders)
 }
 
 export function TestEventModal({ ruleId, ruleName, eventType, templateId, conditions }: TestEventModalProps) {
   const [open, setOpen] = useState(false)
-  const [loading, setLoading] = useState(false)
-  const [sending, setSending] = useState(false)
+  const [testing, setTesting] = useState(false)
   const [result, setResult] = useState<any>(null)
-  const [templateBody, setTemplateBody] = useState("")
-  const [templateSubject, setTemplateSubject] = useState("")
-  const [placeholders, setPlaceholders] = useState<string[]>([])
   const [formValues, setFormValues] = useState<Record<string, string>>({})
-  const [userId, setUserId] = useState("")
-  const [userEmail, setUserEmail] = useState("")
+  const [testEmail, setTestEmail] = useState("")
+  const [selectedTemplateId, setSelectedTemplateId] = useState(templateId)
+  const [templates, setTemplates] = useState<Template[]>([])
 
-  const payloadFields = extractPayloadFields(conditions)
-  const userFields = extractUserFields(conditions)
-  const allFormFields = Array.from(new Set([...placeholders, ...payloadFields, ...userFields]))
+  const allFormFields = Array.from(new Set([...extractPayloadFields(conditions), ...extractUserFields(conditions)]))
 
   useEffect(() => {
     if (!open) return
     setResult(null)
-    setSending(false)
+    setSelectedTemplateId(templateId)
 
-    const initUser = async () => {
-      const supabase = (await import("@/lib/supabase/client")).createClient()
-      const { data: { session } } = await supabase.auth.getSession()
-      const uid = session?.user?.id || `test_user_${Date.now()}`
-      const email = session?.user?.email || "test@example.com"
-      setUserId(uid)
-      setUserEmail(email)
-    }
-    initUser()
-
-    const fetchTemplate = async () => {
-      setLoading(true)
+    const fetchTemplates = async () => {
       try {
-        const res = await fetch(`/api/templates/${templateId}`)
-        if (res.ok) {
-          const data = await res.json()
-          const body = data.htmlBody || ""
-          const subject = data.subject || ""
-          setTemplateBody(body)
-          setTemplateSubject(subject)
-          const extracted = data.placeholders?.length
-            ? data.placeholders
-            : extractPlaceholders(subject + " " + body)
-          setPlaceholders(extracted)
+        const res = await fetch("/api/templates")
+        if (res.ok) setTemplates(await res.json())
+      } catch { /* ignore */ }
+    }
+    fetchTemplates()
 
-          const defaults: Record<string, string> = {}
-          for (const field of extracted) {
-            defaults[field] = field === "email" ? userEmail : SMART_DEFAULTS[field] || "test_value"
-          }
-          for (const field of payloadFields) {
-            if (!defaults[field]) {
-              defaults[field] = field === "email" ? userEmail : SMART_DEFAULTS[field] || "test_value"
-            }
-          }
-          for (const field of userFields) {
-            if (!defaults[field]) {
-              defaults[field] = field === "email" ? userEmail : SMART_DEFAULTS[field] || "test_value"
-            }
-          }
-          setFormValues(defaults)
-        }
-      } catch {
-        toast.error("Failed to load template data")
-      } finally {
-        setLoading(false)
+    const init = async () => {
+      const { createClient } = await import("@/lib/supabase/client")
+      const supabase = createClient()
+      const { data: { session } } = await supabase.auth.getSession()
+      if (session?.user?.email) {
+        setTestEmail(session.user.email)
       }
     }
+    init()
 
-    fetchTemplate()
-  }, [open, templateId, conditions])
+    const defaults: Record<string, string> = {}
+    for (const field of allFormFields) {
+      defaults[field] = SMART_DEFAULTS[field] || ""
+    }
+    setFormValues(defaults)
+  }, [open])
 
   const updateFormValue = (key: string, value: string) => {
     setFormValues((prev) => ({ ...prev, [key]: value }))
   }
 
-  const buildPayload = () => {
-    const payload: Record<string, string> = {}
-    for (const [key, value] of Object.entries(formValues)) {
-      if (placeholders.includes(key) || payloadFields.includes(key)) {
-        payload[key] = value
-      }
+  const handleRunTest = async () => {
+    if (!testEmail.trim()) {
+      toast.error("Enter an email address")
+      return
     }
-    return payload
-  }
 
-  const handleSend = async () => {
-    setSending(true)
+    setTesting(true)
     setResult(null)
 
     try {
-      const idempotencyKey = `test_${ruleId}_${Date.now()}`
-      const payload = buildPayload()
-
-      const res = await fetch("/api/events", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          event_type: eventType,
-          user_id: userId,
-          payload,
-          idempotency_key: idempotencyKey,
-        }),
+      const details: ConditionDetail[] = conditions.map((c) => {
+        const fieldName = prettyField(c.field)
+        const actualValue = formValues[fieldName] || ""
+        const passed = evaluateCondition(actualValue, c.operator, c.value)
+        return {
+          field: c.field,
+          operator: c.operator,
+          expectedValue: c.value,
+          actualValue,
+          passed,
+        }
       })
 
-      if (!res.ok) {
-        const err = await res.json()
-        throw new Error(err.error || "Failed to send event")
+      const matched = details.every((d) => d.passed)
+
+      let emailResult = null
+      if (matched) {
+        const placeholderValues: Record<string, string> = {}
+        for (const [key, value] of Object.entries(formValues)) {
+          placeholderValues[key] = value
+        }
+        placeholderValues.email = testEmail.trim()
+
+        const res = await fetch("/api/rules/test-email", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            to: testEmail.trim(),
+            templateId: selectedTemplateId,
+            placeholderValues,
+            ruleId,
+            ruleName,
+          }),
+        })
+
+        const data = await res.json()
+        emailResult = {
+          status: data.success ? "sent" : "failed",
+          error: data.error || null,
+        }
       }
 
-      await new Promise((resolve) => setTimeout(resolve, 2000))
-
-      const [evalRes, emailRes] = await Promise.all([
-        fetch(`/api/logs?type=evaluation&ruleId=${ruleId}`),
-        fetch(`/api/logs?type=email&ruleId=${ruleId}`),
-      ])
-
-      const evalLogs = evalRes.ok ? await evalRes.json() : []
-      const emailLogs = emailRes.ok ? await emailRes.json() : []
-
-      const latestEval = evalLogs[0] || null
-      const latestEmail = emailLogs[0] || null
-
       setResult({
-        evalLog: latestEval,
-        emailLog: latestEmail,
-        sentTo: payload.email || "test@example.com",
+        matched,
+        details,
+        emailResult,
+        sentTo: testEmail.trim(),
       })
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Test failed")
-      setResult({ error: err instanceof Error ? err.message : "Test failed" })
+      setResult({
+        error: err instanceof Error ? err.message : "Test failed",
+        details: [],
+        matched: false,
+        emailResult: null,
+      })
     } finally {
-      setSending(false)
+      setTesting(false)
     }
   }
 
-  const handleSendAgain = () => {
+  const handleRunAgain = () => {
     setResult(null)
-    setUserId(userId || `test_user_${Date.now()}`)
-  }
-
-  const operatorLabel = (op: string) => {
-    const map: Record<string, string> = { eq: "=", neq: "!=", gt: ">", lt: "<", gte: ">=", lte: "<=", contains: "contains" }
-    return map[op] || op
   }
 
   return (
@@ -233,11 +248,7 @@ export function TestEventModal({ ruleId, ruleName, eventType, templateId, condit
           <DialogTitle>Test Rule: {ruleName}</DialogTitle>
         </DialogHeader>
 
-        {loading ? (
-          <div className="flex items-center justify-center py-8">
-            <Loader2 className="h-6 w-6 animate-spin" />
-          </div>
-        ) : result ? (
+        {result ? (
           result.error ? (
             <div className="space-y-4">
               <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4">
@@ -247,67 +258,87 @@ export function TestEventModal({ ruleId, ruleName, eventType, templateId, condit
                 </div>
                 <p className="text-sm mt-1">{result.error}</p>
               </div>
-              <Button onClick={handleSendAgain} variant="outline" className="w-full">
-                Send Again
+              <Button onClick={handleRunAgain} variant="outline" className="w-full">
+                Run Again
               </Button>
             </div>
           ) : (
             <div className="space-y-4">
-              <div className="rounded-lg border border-green-500/50 bg-green-50 dark:bg-green-950 p-4 space-y-3">
-                <div className="flex items-center gap-2 text-green-700 dark:text-green-400 font-medium">
-                  <CheckCircle2 className="h-5 w-5" />
-                  Event received
+              <div className={`rounded-lg border p-4 space-y-3 ${
+                result.matched
+                  ? "border-green-500/50 bg-green-50 dark:bg-green-950"
+                  : "border-amber-500/50 bg-amber-50 dark:bg-amber-950"
+              }`}>
+                <div className={`flex items-center gap-2 font-medium ${
+                  result.matched
+                    ? "text-green-700 dark:text-green-400"
+                    : "text-amber-700 dark:text-amber-400"
+                }`}>
+                  {result.matched ? (
+                    <CheckCircle2 className="h-5 w-5" />
+                  ) : (
+                    <XCircle className="h-5 w-5" />
+                  )}
+                  Rule {result.matched ? "matched" : "did not match"}
                 </div>
 
-                {result.evalLog && (
-                  <div className="space-y-1">
-                    <p className="text-sm font-medium text-foreground">
-                      Rule Evaluation: {result.evalLog.ruleName}
-                    </p>
-                    {result.evalLog.details?.conditions?.map((c: any, i: number) => (
+                <div className="space-y-1">
+                  <p className="text-sm font-medium text-foreground">
+                    Rule Evaluation: {ruleName}
+                  </p>
+                  {result.details.length > 0 ? (
+                    result.details.map((d: ConditionDetail, i: number) => (
                       <div key={i} className="flex items-center gap-2 text-sm">
-                        {c.passed ? (
+                        {d.passed ? (
                           <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0" />
                         ) : (
                           <XCircle className="h-4 w-4 text-red-500 shrink-0" />
                         )}
                         <span>
-                          {c.field} {operatorLabel(c.operator)} {String(c.expectedValue)}
+                          {d.field} {operatorLabel(d.operator)} {d.expectedValue}
                           {" → "}
-                          <span className={c.passed ? "text-green-600" : "text-red-600"}>
-                            {c.passed ? "Matched" : "No match"}
+                          <span className={d.passed ? "text-green-600" : "text-red-600"}>
+                            {d.passed ? "Matched" : "No match"}
                           </span>
                           <span className="text-muted-foreground">
-                            {" "}(actual: {String(c.actualValue ?? "null")})
+                            {" "}(actual: {d.actualValue || "null"})
                           </span>
                         </span>
                       </div>
-                    ))}
-                    {(!result.evalLog.details?.conditions || result.evalLog.details?.conditions?.length === 0) && (
-                      <p className="text-sm text-muted-foreground">No conditions - rule matches all events of this type</p>
+                    ))
+                  ) : (
+                    <p className="text-sm text-muted-foreground">No conditions - rule matches all events of this type</p>
+                  )}
+                </div>
+
+                {result.emailResult && (
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                      {result.emailResult.status === "sent" ? (
+                        <CheckCircle2 className="h-4 w-4 text-green-500" />
+                      ) : (
+                        <XCircle className="h-4 w-4 text-red-500" />
+                      )}
+                      Email {result.emailResult.status === "sent" ? "sent" : "failed"} to {result.sentTo}
+                    </div>
+                    {result.emailResult.error && (
+                      <p className="text-xs text-red-600 pl-6">{result.emailResult.error}</p>
                     )}
                   </div>
                 )}
 
-                {result.emailLog && (
-                  <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-                    <CheckCircle2 className="h-4 w-4 text-green-500" />
-                    Email {result.emailLog.status === "sent" ? "sent" : "failed"} to {result.sentTo}
-                  </div>
-                )}
-
-                {!result.emailLog && result.evalLog?.matched !== false && (
-                  <p className="text-sm text-muted-foreground">No email logs found for this test event.</p>
+                {result.matched && !result.emailResult && (
+                  <p className="text-sm text-muted-foreground">Sending email...</p>
                 )}
               </div>
 
               <div className="flex gap-2">
-                <Button onClick={handleSendAgain} variant="outline" className="flex-1">
-                  Send Again
+                <Button onClick={handleRunAgain} variant="outline" className="flex-1">
+                  Run Again
                 </Button>
                 <Button variant="outline" className="flex-1 gap-1" onClick={() => window.open("/logs", "_blank")}>
-                  <ExternalLink className="h-4 w-4" />
-                  View Full Logs
+                  <History className="h-4 w-4" />
+                  View Logs
                 </Button>
               </div>
             </div>
@@ -320,36 +351,107 @@ export function TestEventModal({ ruleId, ruleName, eventType, templateId, condit
             </div>
 
             <div className="space-y-2">
-              <Label>User ID</Label>
-              <Input value={userId} onChange={(e) => setUserId(e.target.value)} placeholder="test_user_xxx" />
+              <Label>Email Address</Label>
+              <Input
+                type="email"
+                value={testEmail}
+                onChange={(e) => setTestEmail(e.target.value)}
+                placeholder="user@example.com"
+              />
             </div>
 
-            {allFormFields.length > 0 && (
-              <div className="space-y-3">
-                <Label>Payload Fields</Label>
-                {allFormFields.map((field) => (
-                  <div key={field} className="space-y-1">
-                    <Label className="text-xs text-muted-foreground">{field}</Label>
-                    <Input
-                      value={formValues[field] || ""}
-                      onChange={(e) => updateFormValue(field, e.target.value)}
-                      placeholder={SMART_DEFAULTS[field] || "Enter value"}
-                    />
-                  </div>
-                ))}
+            <div className="space-y-2">
+              <Label>Template</Label>
+              <Select value={selectedTemplateId} onValueChange={setSelectedTemplateId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select template" />
+                </SelectTrigger>
+                <SelectContent>
+                  {templates.map((t) => (
+                    <SelectItem key={t.id} value={t.id}>
+                      {t.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                The template used when sending the test email
+              </p>
+            </div>
+
+            {conditions.length > 0 && (
+              <div className="space-y-2">
+                <Label>Conditions</Label>
+                <div className="space-y-1.5">
+                  {conditions.map((c, i) => (
+                    <div key={i} className="flex items-center gap-2 text-sm">
+                      <Badge variant="outline" className="font-mono text-xs">
+                        {prettyField(c.field)}
+                      </Badge>
+                      <span className="text-muted-foreground">{operatorLabel(c.operator)}</span>
+                      <Badge variant="secondary" className="font-mono text-xs">
+                        {c.value}
+                      </Badge>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
 
-            <p className="text-xs text-muted-foreground">
-              Emails will be sent to the email in the payload (must match your Resend verified email).
-            </p>
-            <Button onClick={handleSend} className="w-full gap-2" disabled={sending}>
-              {sending ? (
+            {allFormFields.length > 0 && (
+              <div className="space-y-3">
+                <Label>Test Values</Label>
+                {allFormFields.map((field) => {
+                  const def = getFieldDef(field, conditions)
+                  const fieldType = def?.type ?? "string"
+                  const useSelect = fieldType === "boolean" || (def?.options && def.options.length > 0)
+
+                  return (
+                    <div key={field} className="space-y-1">
+                      <Label className="text-xs text-muted-foreground">{field}</Label>
+                      {useSelect ? (
+                        <Select value={formValues[field] || ""} onValueChange={(v) => updateFormValue(field, v)}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select value" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {fieldType === "boolean" ? (
+                              <>
+                                <SelectItem value="true">Yes / True</SelectItem>
+                                <SelectItem value="false">No / False</SelectItem>
+                              </>
+                            ) : (
+                              def?.options?.map((opt) => (
+                                <SelectItem key={opt} value={opt}>
+                                  {opt}
+                                </SelectItem>
+                              ))
+                            )}
+                          </SelectContent>
+                        </Select>
+                      ) : (
+                        <Input
+                          type={fieldType === "number" ? "number" : "text"}
+                          step={fieldType === "number" ? "1" : undefined}
+                          min={fieldType === "number" ? "0" : undefined}
+                          value={formValues[field] || ""}
+                          onChange={(e) => updateFormValue(field, e.target.value)}
+                          placeholder={SMART_DEFAULTS[field] || "Enter value"}
+                        />
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+
+            <Button onClick={handleRunTest} className="w-full gap-2" disabled={testing}>
+              {testing ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
                 <Zap className="h-4 w-4" />
               )}
-              {sending ? "Processing..." : "Send Test Event"}
+              {testing ? "Testing..." : "Run Test"}
             </Button>
           </div>
         )}
